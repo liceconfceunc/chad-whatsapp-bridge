@@ -87,8 +87,21 @@ def recibir_webhook():
         print(f"ERROR guardando webhook: {e}", flush=True)
 
     return "EVENT_RECEIVED", 200
+@app.get("/jobs/next")
+def siguiente_job():
+    resultado = (
+        supabase.table("whatsapp_jobs")
+        .select("*")
+        .eq("status", "pending")
+        .order("created_at")
+        .limit(1)
+        .execute()
+    )
 
+    if not resultado.data:
+        return {"job": None}, 200
 
+    return {"job": resultado.data[0]}, 200
 if __name__ == "__main__":
     puerto = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=puerto)
