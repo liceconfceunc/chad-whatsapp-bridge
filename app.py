@@ -1,6 +1,8 @@
 import os
 from datetime import datetime, timezone
-
+import json
+import urllib.request
+import urllib.error
 from flask import Flask, request
 from supabase import create_client
 
@@ -15,7 +17,20 @@ supabase = create_client(
     SUPABASE_KEY,
 )
 
+WHATSAPP_TOKEN = os.environ.get(
+    "WHATSAPP_TOKEN",
+    "",
+)
 
+WHATSAPP_PHONE_NUMBER_ID = os.environ.get(
+    "WHATSAPP_PHONE_NUMBER_ID",
+    "",
+)
+
+META_API_VERSION = os.environ.get(
+    "META_API_VERSION",
+    "",
+)
 @app.get("/")
 def inicio():
     return {
@@ -182,7 +197,47 @@ def siguiente_job():
         "job": job
     }, 200
 
+def enviar_whatsapp(destinatario, texto):
+    url = (
+        f"https://graph.facebook.com/"
+        f"{META_API_VERSION}/"
+        f"{WHATSAPP_PHONE_NUMBER_ID}/messages"
+    )
 
+    payload = {
+        "messaging_product": "whatsapp",
+        "recipient_type": "individual",
+        "to": destinatario,
+        "type": "text",
+        "text": {
+            "preview_url": False,
+            "body": texto,
+        },
+    }
+
+    datos = json.dumps(
+        payload
+    ).encode("utf-8")
+
+    peticion = urllib.request.Request(
+        url,
+        data=datos,
+        headers={
+            "Authorization":
+                f"Bearer {WHATSAPP_TOKEN}",
+            "Content-Type":
+                "application/json",
+        },
+        method="POST",
+    )
+
+    with urllib.request.urlopen(
+        peticion,
+        timeout=30,
+    ) as respuesta:
+        return json.loads(
+            respuesta.read().decode("utf-8")
+        )
 @app.post("/jobs/result")
 def guardar_resultado():
     datos = request.get_json(
@@ -203,6 +258,29 @@ def guardar_resultado():
                 "Faltan id o response_text"
         }, 400
 
+    resultado_job = (
+        supabase
+        .table("whatsapp_jobs")
+        .select("*")
+        .eq("id", job_id)
+        .limit(1)
+        .execute()
+    )
+
+    if not resultado_job.data:
+        return {
+            "error": "Job no encontrado"
+        }, 404
+
+    job = resultado_job.data[0]
+
+    # Enviamos la respuesta de CHAD
+    # al mismo usuario que escribió.
+    resultado_meta = enviar_whatsapp(
+        job["sender"],
+        respuesta,
+    )
+
     procesado = datetime.now(
         timezone.utc
     ).isoformat()
@@ -215,21 +293,19 @@ def guardar_resultado():
             "response_text": respuesta,
             "processed_at": procesado,
         })
-        .eq(
-            "id",
-            job_id,
-        )
+        .eq("id", job_id)
         .execute()
     )
 
     print(
-        f"Job {job_id} completado.",
+        f"Job {job_id} enviado a WhatsApp.",
         flush=True,
     )
 
     return {
         "status": "ok",
         "id": job_id,
+        "whatsapp": resultado_meta,
     }, 200
 
 
